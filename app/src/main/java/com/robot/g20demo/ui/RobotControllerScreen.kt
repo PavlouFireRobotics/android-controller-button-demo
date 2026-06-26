@@ -25,6 +25,8 @@ fun RobotControllerScreen(
     state: G20State = G20State(),
     batteryState: RobotBatteryState = RobotBatteryState(),
     networkStatus: String = "Unknown",
+    videoUrl1: String = "",
+    videoUrl2: String = "",
     onSleepToggle: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
@@ -94,7 +96,7 @@ fun RobotControllerScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text("FRONT WIDE-ANGLE", fontSize = 10.sp, color = Color.Gray)
                 VideoPlayer(
-                    url = "rtsp://10.21.33.103:8554/video1",
+                    url = videoUrl1,
                     modifier = Modifier.fillMaxSize(),
                     enabled = batteryState.sleepStatus == 0
                 )
@@ -102,7 +104,7 @@ fun RobotControllerScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text("REAR WIDE-ANGLE", fontSize = 10.sp, color = Color.Gray)
                 VideoPlayer(
-                    url = "rtsp://10.21.33.103:8554/video2",
+                    url = videoUrl2,
                     modifier = Modifier.fillMaxSize(),
                     enabled = batteryState.sleepStatus == 0
                 )

@@ -3,9 +3,10 @@ package com.robot.g20demo.network
 import android.util.Log
 import kotlinx.coroutines.*
 import org.json.JSONObject
-import java.net.DatagramPacket
-import java.net.DatagramSocket
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
+import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -26,10 +27,16 @@ data class RobotBatteryState(
     val isSleeping: Boolean get() = sleepStatus != 0
 }
 
-class RobotClient(private val ip: String = "10.21.33.103", private val port: Int = 30000) {
+class RobotClient(private var ip: String = "10.21.33.103", private var port: Int = 30001) {
+
+    fun updateConfig(ip: String, port: Int) {
+        this.ip = ip
+        this.port = port
+    }
 
     private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    private var socket: DatagramSocket? = null
+    private var socket: Socket? = null
+    private var outputStream: OutputStream? = null
     private var listenJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -39,24 +46,61 @@ class RobotClient(private val ip: String = "10.21.33.103", private val port: Int
     fun start() {
         if (listenJob != null) return
         
-        socket = DatagramSocket().apply {
-            soTimeout = 5000 // High timeout for the listener
-        }
-        
         listenJob = scope.launch {
-            val buffer = ByteArray(8192)
-            val packet = DatagramPacket(buffer, buffer.size)
             while (isActive) {
                 try {
-                    socket?.receive(packet)
-                    val data = packet.data.copyOfRange(0, packet.length)
-                    handleResponse(data)
-                } catch (_: Exception) {
-                    // Timeout or socket closed
-                    if (socket?.isClosed == true) break
+                    Log.d("RobotClient", "Connecting to $ip:$port...")
+                    val s = Socket(ip, port)
+                    s.soTimeout = 10000
+                    socket = s
+                    outputStream = s.getOutputStream()
+                    Log.d("RobotClient", "Connected to robot!")
+
+                    val inputStream = s.getInputStream()
+                    handleInputStream(inputStream)
+                } catch (e: Exception) {
+                    Log.e("RobotClient", "Connection error: ${e.message}")
+                    socket?.close()
+                    socket = null
+                    outputStream = null
+                    delay(5000) // Retry delay
                 }
             }
         }
+    }
+
+    private fun handleInputStream(inputStream: InputStream) {
+        val headerBuffer = ByteArray(16)
+        while (socket?.isConnected == true) {
+            // 1. Read Header
+            if (!readFully(inputStream, headerBuffer)) break
+            
+            // Validate Magic Numbers
+            if (headerBuffer[0] != 0xeb.toByte() || headerBuffer[1] != 0x91.toByte()) {
+                Log.w("RobotClient", "Invalid magic header, syncing...")
+                continue
+            }
+
+            // 2. Read Payload Length
+            val asduLength = (headerBuffer[4].toInt() and 0xFF) or ((headerBuffer[5].toInt() and 0xFF) shl 8)
+            
+            // 3. Read Payload
+            val payloadBuffer = ByteArray(asduLength)
+            if (!readFully(inputStream, payloadBuffer)) break
+            
+            val payload = String(payloadBuffer, StandardCharsets.UTF_8)
+            handlePayload(payload)
+        }
+    }
+
+    private fun readFully(inputStream: InputStream, buffer: ByteArray): Boolean {
+        var totalRead = 0
+        while (totalRead < buffer.size) {
+            val read = inputStream.read(buffer, totalRead, buffer.size - totalRead)
+            if (read == -1) return false
+            totalRead += read
+        }
+        return true
     }
 
     suspend fun sendHeartbeat() = withContext(Dispatchers.IO) {
@@ -95,8 +139,7 @@ class RobotClient(private val ip: String = "10.21.33.103", private val port: Int
 
     private suspend fun sendRawCommand(json: String, messageId: Int = 1) = withContext(Dispatchers.IO) {
         try {
-            val ds = socket ?: return@withContext
-            val address = InetAddress.getByName(ip)
+            val out = outputStream ?: return@withContext
             
             val dataBytes = json.toByteArray(StandardCharsets.UTF_8)
             val dataLength = dataBytes.size
@@ -116,21 +159,15 @@ class RobotClient(private val ip: String = "10.21.33.103", private val port: Int
             System.arraycopy(header, 0, packetData, 0, 16)
             System.arraycopy(dataBytes, 0, packetData, 16, dataLength)
             
-            val packet = DatagramPacket(packetData, packetData.size, address, port)
-            ds.send(packet)
+            out.write(packetData)
+            out.flush()
         } catch (e: Exception) {
             Log.e("RobotClient", "Send error: ${e.message}")
         }
     }
 
-    private fun handleResponse(data: ByteArray) {
-        if (data.size < 16) return
+    private fun handlePayload(payload: String) {
         try {
-            val asduLength = (data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)
-            if (data.size < 16 + asduLength) return
-            
-            val payload = String(data, 16, asduLength, StandardCharsets.UTF_8)
-            
             val json = JSONObject(payload)
             val patrolDevice = json.optJSONObject("PatrolDevice") ?: return
             val type = patrolDevice.optInt("Type")
@@ -214,7 +251,10 @@ class RobotClient(private val ip: String = "10.21.33.103", private val port: Int
     fun stop() {
         listenJob?.cancel()
         listenJob = null
-        socket?.close()
+        try {
+            socket?.close()
+        } catch (_: Exception) {}
         socket = null
+        outputStream = null
     }
 }

@@ -19,6 +19,8 @@ import androidx.lifecycle.viewModelScope
 import com.robot.g20demo.network.RobotBatteryState
 import com.robot.g20demo.network.RobotClient
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.File
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.*
@@ -44,6 +46,12 @@ class MainViewModel : ViewModel() {
     var batteryState by mutableStateOf(RobotBatteryState())
         private set
 
+    var videoUrl1 by mutableStateOf("rtsp://10.21.33.103:8554/video1")
+        private set
+
+    var videoUrl2 by mutableStateOf("rtsp://10.21.33.103:8554/video2")
+        private set
+
     var networkStatus by mutableStateOf("Checking...")
         private set
 
@@ -51,36 +59,76 @@ class MainViewModel : ViewModel() {
     private var heartbeatTimer: Timer? = null
 
     private var isInitialized = false
+    private var isSdkLoaded = false
 
     /**
      * Initializes the Skydroid SDK and connects to the RC.
      * @param context Application context for SDK initialization.
      */
     fun initialize(context: Context) {
+        loadConfig(context)
         checkNetwork(context)
         if (isInitialized) return
         isInitialized = true
 
-        RCSDKManager.initSDK(context.applicationContext, object : SDKManagerCallBack {
-            override fun onRcConnectFail(e: SkyException?) {
-                Log.e("MainViewModel", "RC Connect Fail: ${e?.toString()}")
+        // Start robot communication immediately
+        robotClient.start()
+        startHeartbeat()
+
+        // Attempt to initialize RC SDK (will fail gracefully on emulators)
+        try {
+            RCSDKManager.initSDK(context.applicationContext, object : SDKManagerCallBack {
+                override fun onRcConnectFail(e: SkyException?) {
+                    Log.e("MainViewModel", "RC Connect Fail: ${e?.toString()}")
+                }
+
+                override fun onRcConnected() {
+                    Log.d("MainViewModel", "RC Connected successfully!")
+                    startPolling()
+                }
+
+                override fun onRcDisconnect() {
+                    Log.w("MainViewModel", "RC Disconnected")
+                    stopPolling()
+                }
+            })
+            RCSDKManager.connectToRC()
+            isSdkLoaded = true
+        } catch (e: Throwable) {
+            Log.w("MainViewModel", "RC SDK initialization skipped or failed: ${e.message}")
+        }
+    }
+
+    private fun loadConfig(context: Context) {
+        try {
+            // 1. Try to load from internal storage first (allows easy overrides via ADB)
+            val configFile = File(context.filesDir, "config.json")
+            val jsonString = if (configFile.exists()) {
+                Log.d("MainViewModel", "Loading config from internal storage")
+                configFile.readText()
+            } else {
+                // 2. Fallback to assets
+                Log.d("MainViewModel", "Loading config from assets")
+                context.assets.open("config.json").bufferedReader().use { it.readText() }
             }
 
-            override fun onRcConnected() {
-                Log.d("MainViewModel", "RC Connected successfully!")
-                robotClient.start()
-                startPolling()
-                startHeartbeat()
-            }
+            val json = JSONObject(jsonString)
+            val ip = json.optString("robot_ip", "10.21.33.103")
+            // Try tcp_port first, then fallback to old robot_port
+            val port = if (json.has("tcp_port")) json.getInt("tcp_port") else json.optInt("robot_port", 30001)
 
-            override fun onRcDisconnect() {
-                Log.w("MainViewModel", "RC Disconnected")
-                robotClient.stop()
-                stopPolling()
-                stopHeartbeat()
-            }
-        })
-        RCSDKManager.connectToRC()
+            val videoPort = json.optInt("video_port", 8554)
+            val v1Path = json.optString("video1_path", "/video1")
+            val v2Path = json.optString("video2_path", "/video2")
+
+            videoUrl1 = "rtsp://$ip:$videoPort$v1Path"
+            videoUrl2 = "rtsp://$ip:$videoPort$v2Path"
+
+            Log.i("MainViewModel", "Configuring RobotClient with IP: $ip, Port: $port")
+            robotClient.updateConfig(ip, port)
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error loading config, using defaults", e)
+        }
     }
 
     private fun startHeartbeat() {
@@ -183,6 +231,10 @@ class MainViewModel : ViewModel() {
         stopPolling()
         stopHeartbeat()
         robotClient.stop()
-        RCSDKManager.disconnectRC()
+        if (isSdkLoaded) {
+            try {
+                RCSDKManager.disconnectRC()
+            } catch (_: Throwable) {}
+        }
     }
 }

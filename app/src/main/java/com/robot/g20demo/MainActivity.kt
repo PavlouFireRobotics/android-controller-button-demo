@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
                             state = viewModel.g20State,
                             batteryState = viewModel.batteryState,
                             networkStatus = viewModel.networkStatus,
+                            videoUrl1 = viewModel.videoUrl1,
+                            videoUrl2 = viewModel.videoUrl2,
                             onSleepToggle = { viewModel.toggleSleepMode() }
                         )
                     }
