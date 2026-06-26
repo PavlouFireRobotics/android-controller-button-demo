@@ -2,6 +2,11 @@
 
 This application is a demonstration for integrating the **Skydroid G20 Controller** with a physical robot. It provides a real-time control interface, telemetry monitoring, and live video feeds from the robot's cameras.
 
+## Reference Documentation
+
+- **Control Protocol**: The communication protocol for UDP and TCP commands was developed in reference to the [Robot Control Specification](https://alidocs.dingtalk.com/i/p/OlnXRl7ed542DGLp/docs/EpGBa2Lm8azb3ZNbCZEA3LMGWgN7R35y).
+- **Hardware**: Designed for the [Skydroid G20 Remote Controller](https://skydroidglobal.com/products/skydroid-g20-remote-controller?srsltid=AfmBOorI6PPD2_8Rpu1GkHP6UzyXCLN_G52X-nf36v850ewpJHpFniwl).
+
 ## Key Features
 
 - **Skydroid SDK Integration**: Direct communication with the G20 remote controller via the `rcsdk` library.
