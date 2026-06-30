@@ -11,6 +11,10 @@ import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class BatteryInfo(
     val level: Int = 0,
@@ -115,7 +119,8 @@ class RobotClient(private var ip: String = "10.21.33.103", private var port: Int
             }
         }
         """.trimIndent()
-        sendRawCommand(json, messageId = 1)
+        //sendUdpCommand(json, messageId = 1) send over UDP
+        sendRawCommand(json, messageId = 1) // send over TCP
     }
 
     suspend fun setSleepMode(sleep: Boolean) = withContext(Dispatchers.IO) {
@@ -166,6 +171,44 @@ class RobotClient(private var ip: String = "10.21.33.103", private var port: Int
         }
     }
 
+    // draft for also sending commands over UDP (Needs Refinement e.g. port as a parameter, not create a new udp socket everytime etc.)
+    private suspend fun sendUdpCommand(json: String, messageId: Int = 1) = withContext(Dispatchers.IO) {
+        try {
+            val dataBytes = json.toByteArray(StandardCharsets.UTF_8)
+            val dataLength = dataBytes.size
+
+            // Build the identical 16-byte header
+            val header = ByteArray(16)
+            header[0] = 0xeb.toByte()
+            header[1] = 0x91.toByte()
+            header[2] = 0xeb.toByte()
+            header[3] = 0x90.toByte()
+            header[4] = (dataLength and 0xFF).toByte()
+            header[5] = ((dataLength shr 8) and 0xFF).toByte()
+            header[6] = (messageId and 0xFF).toByte()
+            header[7] = ((messageId shr 8) and 0xFF).toByte()
+            header[8] = 0x01.toByte() // JSON format
+
+            val packetData = ByteArray(16 + dataLength)
+            System.arraycopy(header, 0, packetData, 0, 16)
+            System.arraycopy(dataBytes, 0, packetData, 16, dataLength)
+
+            // --- UDP SENDING LOGIC ---
+            // Replace "10.0.2.2" if you have a dynamic IP variable stored in RobotClient
+            val address = InetAddress.getByName("10.0.2.2")
+            val port = 30000 // UDP port
+
+            val udpSocket = DatagramSocket()
+            val datagramPacket = DatagramPacket(packetData, packetData.size, address, port)
+
+            udpSocket.send(datagramPacket) //send over udp
+            udpSocket.close()
+            // -------------------------
+
+        } catch (e: Exception) {
+            Log.e("RobotClient", "UDP Send error: ${e.message}")
+        }
+    }
     private fun handlePayload(payload: String) {
         try {
             val json = JSONObject(payload)
@@ -173,7 +216,7 @@ class RobotClient(private var ip: String = "10.21.33.103", private var port: Int
             val type = patrolDevice.optInt("Type")
             val command = patrolDevice.optInt("Command")
             val items = patrolDevice.optJSONObject("Items") ?: return
-            // log the received feedback
+            // Log the received feedback
             Log.d("MY_WIRETAP", "Parsed Type: $type, Command: $command")
             Log.d("MY_WIRETAP", "RAW JSON: $payload")
             if (type == 1002) {

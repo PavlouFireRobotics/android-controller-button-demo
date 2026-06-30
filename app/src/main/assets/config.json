@@ -1,8 +1,9 @@
 {
   "robot_ip": "10.0.2.2",
-  "udp_port": 30000,
-  "tcp_port": 30001,
+  "udp_port": 30000, 
+  "tcp_port": 30001, 
   "video_port": 8554,
   "video1_path": "/video1",
   "video2_path": "/video2"
 }
+
