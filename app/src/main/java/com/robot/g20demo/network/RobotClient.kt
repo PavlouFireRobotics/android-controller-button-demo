@@ -173,7 +173,9 @@ class RobotClient(private var ip: String = "10.21.33.103", private var port: Int
             val type = patrolDevice.optInt("Type")
             val command = patrolDevice.optInt("Command")
             val items = patrolDevice.optJSONObject("Items") ?: return
-
+            // log the received feedback
+            Log.d("MY_WIRETAP", "Parsed Type: $type, Command: $command")
+            Log.d("MY_WIRETAP", "RAW JSON: $payload")
             if (type == 1002) {
                 when (command) {
                     5 -> parseBatteryData(items)
